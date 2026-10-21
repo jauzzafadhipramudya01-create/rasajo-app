@@ -1,765 +1,341 @@
 'use client';
 
-import { useEffect, useState, use } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { 
-  ArrowLeft, 
-  Clock, 
-  DollarSign, 
-  CheckCircle2, 
-  Lock, 
-  AlertCircle, 
-  ReceiptText, 
-  X, 
-  Save, 
-  Unlock 
+import {
+  Store,
+  ChevronRight,
+  ShieldAlert,
+  Flame,
+  Award,
+  Zap,
+  TrendingUp,
+  Sparkles
 } from 'lucide-react';
 
-interface Employee {
+interface Branch {
   id: string;
   name: string;
 }
 
-type SupplyLevel = 'Banyak' | 'Sedang' | 'Sedikit';
+interface StaffLeaderboard {
+  id: string;
+  name: string;
+  totalSold: number;
+  totalPoints: number;
+  shiftsCount: number;
+}
 
-export default function OutletOpsPage({ params }: { params: Promise<{ id: string }> }) {
+export default function HomePage() {
   const router = useRouter();
-  const resolvedParams = use(params);
-  const branchId = resolvedParams.id;
-
-  const [branchName, setBranchName] = useState('Outlet Rasajo');
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [activeTab, setActiveTab] = useState<'pagi' | 'malam'>('pagi');
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'sales' | 'discipline'>('sales');
+  const [leaderboard, setLeaderboard] = useState<StaffLeaderboard[]>([]);
 
-  // Status Shift Hari Ini
-  const [shiftId, setShiftId] = useState<string | null>(null);
-  const [shiftStatus, setShiftStatus] = useState<'none' | 'open' | 'closed'>('none');
-  const [isMorningUnlocked, setIsMorningUnlocked] = useState<boolean>(false);
+  // Modal PIN Owner
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [ownerPin, setOwnerPin] = useState('');
+  const [pinError, setPinError] = useState(false);
 
-  // Form Shift Pagi
-  const [selectedStaff, setSelectedStaff] = useState<string[]>([]);
-  const [initialCilok, setInitialCilok] = useState<number>(0);
-  const [initialTahu, setInitialTahu] = useState<number>(0);
+  useEffect(() => {
+    fetchData();
+  }, []);
 
-  // Tambahan Stok Siang/Sore
-  const [additionalCilok, setAdditionalCilok] = useState<number>(0);
-  const [additionalTahu, setAdditionalTahu] = useState<number>(0);
-
-  // Form Setoran Malam
-  const [remainingCilok, setRemainingCilok] = useState<number>(0);
-  const [remainingTahu, setRemainingTahu] = useState<number>(0);
-  const [expenseAmount, setExpenseAmount] = useState<number>(0);
-  const [expenseNotes, setExpenseNotes] = useState<string>('');
-
-  const [supplies, setSupplies] = useState<Record<string, SupplyLevel>>({
-    saos: 'Banyak',
-    kecap: 'Banyak',
-    plastik: 'Banyak',
-    tusukan: 'Banyak',
-  });
-
-  // State Modal Custom UI
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [modalType, setModalType] = useState<'open_shift' | 'close_shift'>('open_shift');
-  const [feedbackModal, setFeedbackModal] = useState<{
-    show: boolean;
-    type: 'success' | 'error';
-    title: string;
-    message: string;
-  }>({
-    show: false,
-    type: 'success',
-    title: '',
-    message: '',
-  });
-
-  const today = new Date().toISOString().split('T')[0];
-
-  const loadData = async () => {
+  const fetchData = async () => {
     setLoading(true);
 
-    const { data: bData } = await supabase
-      .from('branches')
-      .select('name')
-      .eq('id', branchId)
-      .single();
-    if (bData) setBranchName(bData.name);
+    // 1. Ambil Data Cabang
+    const { data: bData } = await supabase.from('branches').select('id, name').order('name');
+    if (bData) setBranches(bData);
 
-    const { data: empData } = await supabase
-      .from('employees')
-      .select('id, name')
-      .eq('is_active', true);
-    if (empData) setEmployees(empData);
+    // 2. Ambil Data Penjualan & Poin Bulan Ini
+    const today = new Date();
+    const firstDayOfMonth = today.toISOString().slice(0, 8) + '01';
+    const todayStr = today.toISOString().split('T')[0];
 
-    const { data: sData } = await supabase
+    const { data: shiftData } = await supabase
       .from('daily_shifts')
-      .select('*')
-      .eq('branch_id', branchId)
-      .eq('shift_date', today)
-      .maybeSingle();
+      .select('id, sold_cilok, sold_tahu, discipline_points, status')
+      .gte('shift_date', firstDayOfMonth)
+      .lte('shift_date', todayStr)
+      .eq('status', 'closed');
 
-    if (sData) {
-      setShiftId(sData.id);
-      setShiftStatus(sData.status as 'open' | 'closed');
-      setIsMorningUnlocked(Boolean(sData.is_morning_unlocked));
-      setInitialCilok(sData.initial_cilok || 0);
-      setInitialTahu(sData.initial_tahu || 0);
-      setAdditionalCilok(sData.additional_cilok || 0);
-      setAdditionalTahu(sData.additional_tahu || 0);
-      setRemainingCilok(sData.remaining_cilok || 0);
-      setRemainingTahu(sData.remaining_tahu || 0);
-      setExpenseAmount(Number(sData.branch_expenses) || 0);
-      setExpenseNotes(sData.expense_notes || '');
+    const { data: staffData } = await supabase
+      .from('shift_staff')
+      .select('shift_id, employee_id, employees(id, name)');
 
-      if (sData.supplies_status) {
-        setSupplies(sData.supplies_status);
-      }
+    if (shiftData && staffData) {
+      const staffMap: Record<string, StaffLeaderboard> = {};
 
-      const { data: staffData } = await supabase
-        .from('shift_staff')
-        .select('employee_id')
-        .eq('shift_id', sData.id);
-      if (staffData) {
-        setSelectedStaff(staffData.map((s) => s.employee_id));
-      }
+      shiftData.forEach((s) => {
+        const assignedStaff = staffData.filter((st) => st.shift_id === s.id);
+        const count = assignedStaff.length || 1;
+        const soldPerPerson = Math.round(((s.sold_cilok || 0) + (s.sold_tahu || 0)) / count);
+        const pointsPerPerson = s.discipline_points || 0; // Poin disiplin utuh per orang
 
-      if (sData.status === 'open') {
-        setActiveTab('malam');
-      }
-    } else {
-      setShiftId(null);
-      setShiftStatus('none');
-      setIsMorningUnlocked(false);
-      setSelectedStaff([]);
-      setInitialCilok(0);
-      setInitialTahu(0);
-      setActiveTab('pagi');
+        assignedStaff.forEach((st: any) => {
+          const empId = st.employees?.id || st.employee_id;
+          const empName = st.employees?.name || 'Karyawan';
+
+          if (!staffMap[empId]) {
+            staffMap[empId] = {
+              id: empId,
+              name: empName,
+              totalSold: 0,
+              totalPoints: 0,
+              shiftsCount: 0,
+            };
+          }
+
+          staffMap[empId].totalSold += soldPerPerson;
+          staffMap[empId].totalPoints += pointsPerPerson;
+          staffMap[empId].shiftsCount += 1;
+        });
+      });
+
+      setLeaderboard(Object.values(staffMap));
     }
 
     setLoading(false);
   };
 
-  useEffect(() => {
-    loadData();
-  }, [branchId, today]);
+  // Sort Leaderboard
+  const sortedSales = useMemo(() => {
+    return [...leaderboard].sort((a, b) => b.totalSold - a.totalSold);
+  }, [leaderboard]);
 
-  // Kalkulasi Keuangan
-  const hargaCilok = 1000;
-  const hargaTahu = 1000;
+  const sortedDiscipline = useMemo(() => {
+    return [...leaderboard].sort((a, b) => b.totalPoints - a.totalPoints);
+  }, [leaderboard]);
 
-  const totalStokCilok = Number(initialCilok) + Number(additionalCilok);
-  const totalStokTahu = Number(initialTahu) + Number(additionalTahu);
-
-  const soldCilok = Math.max(0, totalStokCilok - Number(remainingCilok));
-  const soldTahu = Math.max(0, totalStokTahu - Number(remainingTahu));
-
-  const grossRevenue = soldCilok * hargaCilok + soldTahu * hargaTahu;
-  const feeKaryawan = grossRevenue * 0.1;
-  const netCashDeposit = Math.max(0, grossRevenue - feeKaryawan - Number(expenseAmount));
-
-  // Kunci form pagi: Hanya bisa diedit jika belum buka shift ATAU jika owner sengaja membuka gembok
-  const canEditMorning = shiftStatus === 'none' || isMorningUnlocked;
-
-  const handleToggleStaff = (empId: string) => {
-    if (!canEditMorning) return;
-    setSelectedStaff((prev) =>
-      prev.includes(empId) ? prev.filter((id) => id !== empId) : [...prev, empId]
-    );
+  const handleVerifyOwnerPin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (ownerPin === '1234') { // Sesuaikan dengan PIN owner lu
+      setShowPinModal(false);
+      router.push('/owner');
+    } else {
+      setPinError(true);
+    }
   };
-
-  const cycleSupplyLevel = (item: string) => {
-    if (shiftStatus === 'closed') return;
-    const levels: SupplyLevel[] = ['Banyak', 'Sedang', 'Sedikit'];
-    const current = supplies[item] || 'Banyak';
-    const next = levels[(levels.indexOf(current) + 1) % levels.length];
-    setSupplies((prev) => ({ ...prev, [item]: next }));
-  };
-
-  const triggerOpenShift = () => {
-    if (selectedStaff.length === 0) {
-      setFeedbackModal({
-        show: true,
-        type: 'error',
-        title: 'Karyawan Belum Dipilih',
-        message: 'Pilih minimal satu karyawan yang bertugas menjaga outlet hari ini.',
-      });
-      return;
-    }
-    if (initialCilok <= 0 && initialTahu <= 0) {
-      setFeedbackModal({
-        show: true,
-        type: 'error',
-        title: 'Stok Awal Kosong',
-        message: 'Masukkan jumlah stok awal cilok atau tahu yang diterima pagi ini.',
-      });
-      return;
-    }
-
-    setModalType('open_shift');
-    setShowConfirmModal(true);
-  };
-
-  const triggerCloseShift = () => {
-    if (!shiftId) {
-      setFeedbackModal({
-        show: true,
-        type: 'error',
-        title: 'Shift Belum Aktif',
-        message: 'Shift pagi belum dibuka, tidak bisa melakukan tutup kasir.',
-      });
-      return;
-    }
-
-    if (expenseAmount > 0 && !expenseNotes.trim()) {
-      setFeedbackModal({
-        show: true,
-        type: 'error',
-        title: 'Keterangan Diperlukan',
-        message: 'Kamu memasukkan nominal pengeluaran. Tuliskan keterangannya (misal: beli es batu).',
-      });
-      return;
-    }
-
-    setModalType('close_shift');
-    setShowConfirmModal(true);
-  };
-
-  // Simpan/Update Shift Pagi
-  const executeOpenShift = async () => {
-    setShowConfirmModal(false);
-
-    if (shiftId) {
-      // Owner membuka gembok pagi -> karyawan menyimpan revisi -> gembok pagi dikunci kembali otomatis
-      const { error } = await supabase
-        .from('daily_shifts')
-        .update({
-          initial_cilok: initialCilok,
-          initial_tahu: initialTahu,
-          is_morning_unlocked: false,
-        })
-        .eq('id', shiftId);
-
-      if (!error) {
-        await supabase.from('shift_staff').delete().eq('shift_id', shiftId);
-        const staffInserts = selectedStaff.map((empId) => ({
-          shift_id: shiftId,
-          employee_id: empId,
-          split_ratio: 1.0 / selectedStaff.length,
-        }));
-        await supabase.from('shift_staff').insert(staffInserts);
-
-        setIsMorningUnlocked(false);
-        setFeedbackModal({
-          show: true,
-          type: 'success',
-          title: 'Revisi Pagi Tersimpan',
-          message: 'Data personil dan stok awal berhasil diperbarui dan dikunci kembali.',
-        });
-      }
-      return;
-    }
-
-    // Buka shift pertama kali
-    const { data: newShift, error } = await supabase
-      .from('daily_shifts')
-      .insert({
-        branch_id: branchId,
-        shift_date: today,
-        status: 'open',
-        initial_cilok: initialCilok,
-        initial_tahu: initialTahu,
-        is_morning_unlocked: false,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      setFeedbackModal({
-        show: true,
-        type: 'error',
-        title: 'Gagal Membuka Shift',
-        message: error.message,
-      });
-      return;
-    }
-
-    const staffInserts = selectedStaff.map((empId) => ({
-      shift_id: newShift.id,
-      employee_id: empId,
-      split_ratio: 1.0 / selectedStaff.length,
-    }));
-    await supabase.from('shift_staff').insert(staffInserts);
-
-    setShiftId(newShift.id);
-    setShiftStatus('open');
-    setIsMorningUnlocked(false);
-    setActiveTab('malam');
-
-    setFeedbackModal({
-      show: true,
-      type: 'success',
-      title: 'Shift Berhasil Dibuka',
-      message: `Selamat bertugas! Data stok awal cabang ${branchName} telah tersimpan dan dikunci.`,
-    });
-  };
-
-  // Simpan Tutup Kasir Malam
-  const executeCloseShift = async () => {
-    setShowConfirmModal(false);
-
-    const { error } = await supabase
-      .from('daily_shifts')
-      .update({
-        status: 'closed',
-        closed_at: new Date().toISOString(),
-        additional_cilok: additionalCilok,
-        additional_tahu: additionalTahu,
-        remaining_cilok: remainingCilok,
-        remaining_tahu: remainingTahu,
-        sold_cilok: soldCilok,
-        sold_tahu: soldTahu,
-        gross_revenue: grossRevenue,
-        fee_amount: feeKaryawan,
-        branch_expenses: expenseAmount,
-        expense_notes: expenseNotes,
-        net_cash_deposit: netCashDeposit,
-        supplies_status: supplies,
-      })
-      .eq('id', shiftId);
-
-    if (error) {
-      setFeedbackModal({
-        show: true,
-        type: 'error',
-        title: 'Gagal Menutup Kasir',
-        message: error.message,
-      });
-      return;
-    }
-
-    setShiftStatus('closed');
-    setFeedbackModal({
-      show: true,
-      type: 'success',
-      title: 'Kasir Berhasil Ditutup',
-      message: `Setoran bersih sebesar Rp ${netCashDeposit.toLocaleString('id-ID')} telah tercatat aman.`,
-    });
-  };
-
-  if (loading) {
-    return (
-      <main className="min-h-screen bg-neutral-100 flex items-center justify-center p-4">
-        <p className="text-neutral-500 font-medium">Memuat data cabang...</p>
-      </main>
-    );
-  }
 
   return (
-    <main className="min-h-screen bg-neutral-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-[420px] bg-white rounded-3xl shadow-xl border border-neutral-200 min-h-[720px] flex flex-col justify-between p-6 relative">
-        <div>
-          {/* Header */}
-          <div className="flex items-center justify-between mb-4">
-            <button
-              onClick={() => router.push('/')}
-              className="w-10 h-10 rounded-full border border-neutral-200 flex items-center justify-center text-neutral-600 hover:bg-neutral-50"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <div className="text-center flex-1 pr-10">
-              <span className="text-[11px] font-bold text-[#C2410C] uppercase tracking-wider block">
-                Operasional Cabang
-              </span>
-              <h1 className="text-xl font-black text-neutral-900 leading-tight">{branchName}</h1>
-            </div>
+    <main className="min-h-screen bg-[#F4F5F7] text-neutral-800 pb-16 font-sans antialiased">
+      <div className="max-w-md mx-auto p-4 sm:p-5 space-y-6">
+
+        {/* Header App */}
+        <div className="text-center pt-4 pb-2">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-orange-100 text-[#C2410C] rounded-full text-xs font-black uppercase tracking-wider mb-2">
+            <Flame className="w-3.5 h-3.5 fill-[#C2410C]" /> Rasajo Portal
           </div>
-
-          {/* Tab Menu */}
-          <div className="grid grid-cols-2 bg-neutral-100 p-1 rounded-2xl mb-5 text-sm font-semibold">
-            <button
-              onClick={() => setActiveTab('pagi')}
-              className={`py-2 rounded-xl transition-all ${
-                activeTab === 'pagi' ? 'bg-white text-neutral-900 shadow-sm' : 'text-neutral-500'
-              }`}
-            >
-              1. Shift Pagi
-            </button>
-            <button
-              onClick={() => setActiveTab('malam')}
-              className={`py-2 rounded-xl transition-all ${
-                activeTab === 'malam' ? 'bg-white text-neutral-900 shadow-sm' : 'text-neutral-500'
-              }`}
-            >
-              2. Setoran Malam
-            </button>
-          </div>
-
-          {/* TAB 1: SHIFT PAGI */}
-          {activeTab === 'pagi' && (
-            <div className="space-y-5">
-              <div>
-                <label className="text-xs font-bold text-neutral-700 uppercase tracking-wide block mb-2">
-                  Siapa yang jaga hari ini?
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {employees.map((emp) => {
-                    const isSelected = selectedStaff.includes(emp.id);
-                    return (
-                      <button
-                        key={emp.id}
-                        type="button"
-                        disabled={!canEditMorning}
-                        onClick={() => handleToggleStaff(emp.id)}
-                        className={`py-2.5 px-2 rounded-xl text-xs font-bold border transition-all ${
-                          isSelected
-                            ? 'border-[#C2410C] bg-[#FFF7ED] text-[#C2410C]'
-                            : 'border-neutral-200 text-neutral-600 hover:border-neutral-300'
-                        } disabled:opacity-75 disabled:cursor-not-allowed`}
-                      >
-                        {emp.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-neutral-700 uppercase tracking-wide block mb-2">
-                  Stok Awal Diterima (Pagi)
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-3">
-                    <span className="text-xs font-medium text-neutral-500 block">Cilok (Butir)</span>
-                    <input
-                      type="number"
-                      disabled={!canEditMorning}
-                      value={initialCilok || ''}
-                      onChange={(e) => setInitialCilok(Number(e.target.value))}
-                      placeholder="0"
-                      className="w-full bg-transparent text-xl font-black text-neutral-900 focus:outline-none disabled:text-neutral-500 mt-1"
-                    />
-                  </div>
-                  <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-3">
-                    <span className="text-xs font-medium text-neutral-500 block">Tahu (Pcs)</span>
-                    <input
-                      type="number"
-                      disabled={!canEditMorning}
-                      value={initialTahu || ''}
-                      onChange={(e) => setInitialTahu(Number(e.target.value))}
-                      placeholder="0"
-                      className="w-full bg-transparent text-xl font-black text-neutral-900 focus:outline-none disabled:text-neutral-500 mt-1"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Status Banner Pagi */}
-              {shiftStatus !== 'none' && !isMorningUnlocked && (
-                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-2.5 text-emerald-800 text-xs font-semibold">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                  <span>Shift pagi sudah aktif terkunci. Silakan lanjut jualan!</span>
-                </div>
-              )}
-
-              {shiftStatus !== 'none' && isMorningUnlocked && (
-                <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-2xl flex items-center gap-2.5 text-blue-800 text-xs font-semibold animate-in fade-in">
-                  <Unlock className="w-5 h-5 text-blue-600 shrink-0" />
-                  <span>Owner membuka gembok pagi. Silakan ubah data personil/stok lalu simpan revisi.</span>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB 2: SETORAN MALAM */}
-          {activeTab === 'malam' && (
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs font-bold text-neutral-700 uppercase tracking-wide block mb-1">
-                  Tambahan Stok Siang/Sore (Opsional)
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    type="number"
-                    disabled={shiftStatus === 'closed'}
-                    value={additionalCilok || ''}
-                    onChange={(e) => setAdditionalCilok(Number(e.target.value))}
-                    placeholder="+ Tambah Cilok"
-                    className="w-full bg-neutral-50 border border-neutral-200 rounded-xl p-2.5 text-xs font-semibold text-neutral-900 focus:outline-none focus:border-[#C2410C] disabled:bg-neutral-100"
-                  />
-                  <input
-                    type="number"
-                    disabled={shiftStatus === 'closed'}
-                    value={additionalTahu || ''}
-                    onChange={(e) => setAdditionalTahu(Number(e.target.value))}
-                    placeholder="+ Tambah Tahu"
-                    className="w-full bg-neutral-50 border border-neutral-200 rounded-xl p-2.5 text-xs font-semibold text-neutral-900 focus:outline-none focus:border-[#C2410C] disabled:bg-neutral-100"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-neutral-700 uppercase tracking-wide block mb-1">
-                  Sisa Fisik Stok Malam (Belum Terjual)
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-3">
-                    <span className="text-[11px] font-medium text-neutral-500 block">Sisa Cilok</span>
-                    <input
-                      type="number"
-                      disabled={shiftStatus === 'closed'}
-                      value={remainingCilok || ''}
-                      onChange={(e) => setRemainingCilok(Number(e.target.value))}
-                      placeholder="0"
-                      className="w-full bg-transparent text-lg font-black text-neutral-900 focus:outline-none disabled:text-neutral-500 mt-0.5"
-                    />
-                  </div>
-                  <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-3">
-                    <span className="text-[11px] font-medium text-neutral-500 block">Sisa Tahu</span>
-                    <input
-                      type="number"
-                      disabled={shiftStatus === 'closed'}
-                      value={remainingTahu || ''}
-                      onChange={(e) => setRemainingTahu(Number(e.target.value))}
-                      placeholder="0"
-                      className="w-full bg-transparent text-lg font-black text-neutral-900 focus:outline-none disabled:text-neutral-500 mt-0.5"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Rekap Card */}
-              <div className="bg-neutral-900 text-white rounded-2xl p-4 text-xs space-y-1.5 shadow-md">
-                <div className="flex justify-between text-neutral-300">
-                  <span>Terjual ({soldCilok} Cilok, {soldTahu} Tahu)</span>
-                  <span className="font-semibold text-white">Rp {grossRevenue.toLocaleString('id-ID')}</span>
-                </div>
-                <div className="flex justify-between text-amber-400 font-medium">
-                  <span>Fee Karyawan (10%)</span>
-                  <span>- Rp {feeKaryawan.toLocaleString('id-ID')}</span>
-                </div>
-                {expenseAmount > 0 && (
-                  <div className="flex justify-between text-rose-400 font-medium">
-                    <span>Pengeluaran ({expenseNotes || 'Biaya'})</span>
-                    <span>- Rp {Number(expenseAmount).toLocaleString('id-ID')}</span>
-                  </div>
-                )}
-                <div className="pt-2 border-t border-neutral-800 flex justify-between items-center text-sm font-black">
-                  <span>UANG SETORAN BERSIH</span>
-                  <span className="text-emerald-400 text-base">
-                    Rp {netCashDeposit.toLocaleString('id-ID')}
-                  </span>
-                </div>
-              </div>
-
-              {/* Input Pengeluaran */}
-              <div>
-                <label className="text-xs font-bold text-neutral-700 uppercase tracking-wide block mb-1">
-                  Pengeluaran Cabang Hari Ini (Jika Ada)
-                </label>
-                <div className="space-y-2">
-                  <input
-                    type="number"
-                    disabled={shiftStatus === 'closed'}
-                    value={expenseAmount || ''}
-                    onChange={(e) => setExpenseAmount(Number(e.target.value))}
-                    placeholder="Nominal pengeluaran (misal: 10000)"
-                    className="w-full bg-neutral-50 border border-neutral-200 rounded-xl p-2.5 text-xs font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:border-[#C2410C] disabled:bg-neutral-100"
-                  />
-                  <input
-                    type="text"
-                    disabled={shiftStatus === 'closed'}
-                    value={expenseNotes}
-                    onChange={(e) => setExpenseNotes(e.target.value)}
-                    placeholder="Keterangan pengeluaran (misal: beli es batu, gas)"
-                    className="w-full bg-neutral-50 border border-neutral-200 rounded-xl p-2.5 text-xs font-semibold text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:border-[#C2410C] disabled:bg-neutral-100"
-                  />
-                </div>
-              </div>
-
-              {/* Status Bahan */}
-              <div>
-                <label className="text-xs font-bold text-neutral-700 uppercase tracking-wide block mb-1">
-                  Kondisi Bahan Pendukung (Klik untuk ganti)
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {Object.entries(supplies).map(([item, level]) => {
-                    const badgeColor =
-                      level === 'Banyak'
-                        ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                        : level === 'Sedang'
-                        ? 'bg-amber-100 text-amber-800 border-amber-200'
-                        : 'bg-rose-100 text-rose-800 border-rose-200';
-
-                    return (
-                      <button
-                        key={item}
-                        type="button"
-                        disabled={shiftStatus === 'closed'}
-                        onClick={() => cycleSupplyLevel(item)}
-                        className="p-2.5 bg-neutral-50 border border-neutral-200 rounded-xl flex items-center justify-between text-xs font-bold capitalize hover:bg-neutral-100 disabled:opacity-75"
-                      >
-                        <span className="text-neutral-800">{item}</span>
-                        <span className={`px-2 py-0.5 rounded-md border text-[10px] font-extrabold ${badgeColor}`}>
-                          {level}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {shiftStatus === 'closed' && (
-                <div className="p-3.5 bg-neutral-100 border border-neutral-200 rounded-2xl flex items-center gap-2 text-neutral-700 text-xs font-semibold">
-                  <Lock className="w-4 h-4 text-neutral-500 shrink-0" />
-                  <span>Shift malam sudah disetor & dikunci. Hubungi Owner untuk membuka gembok.</span>
-                </div>
-              )}
-            </div>
-          )}
+          <h1 className="text-2xl font-black text-neutral-900 tracking-tight">Pilih Outlet Kamu</h1>
+          <p className="text-xs text-neutral-500 mt-1">Pilih cabang tugasmu untuk mulai mencatat stok & kasir.</p>
         </div>
 
-        {/* Footer Tombol */}
-        <div className="pt-4 border-t border-neutral-100">
-          {activeTab === 'pagi' ? (
+        {/* 1. LIST CABANG OUTLET */}
+        <div className="space-y-2.5">
+          {branches.map((b) => (
             <button
-              onClick={triggerOpenShift}
-              disabled={!canEditMorning}
-              className="w-full py-3.5 px-4 bg-[#C2410C] hover:bg-[#A3360A] disabled:bg-neutral-300 disabled:cursor-not-allowed text-white font-bold rounded-2xl shadow-md transition-all flex items-center justify-center gap-2 text-sm"
+              key={b.id}
+              onClick={() => router.push(`/branch/${b.id}`)}
+              className="w-full bg-white hover:bg-neutral-50 border border-neutral-200/90 rounded-2xl p-4 flex items-center justify-between shadow-sm active:scale-[0.98] transition-all group"
             >
-              {shiftStatus === 'none' ? (
-                <>
-                  <Clock className="w-4 h-4" /> Buka Shift Pagi
-                </>
-              ) : isMorningUnlocked ? (
-                <>
-                  <Save className="w-4 h-4" /> Simpan Revisi Shift Pagi
-                </>
-              ) : (
-                <>
-                  <Lock className="w-4 h-4" /> Shift Pagi Sudah Terkunci
-                </>
-              )}
+              <div className="flex items-center gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-orange-50 text-[#C2410C] flex items-center justify-center group-hover:bg-[#C2410C] group-hover:text-white transition-colors">
+                  <Store className="w-5 h-5" />
+                </div>
+                <div className="text-left">
+                  <h2 className="text-sm font-extrabold text-neutral-900">{b.name}</h2>
+                  <span className="text-[11px] text-neutral-400 font-medium">Buka kasir & lapor stok</span>
+                </div>
+              </div>
+              <ChevronRight className="w-5 h-5 text-neutral-400 group-hover:translate-x-1 transition-transform" />
             </button>
-          ) : (
-            <button
-              onClick={triggerCloseShift}
-              disabled={shiftStatus !== 'open'}
-              className="w-full py-3.5 px-4 bg-neutral-950 hover:bg-neutral-800 disabled:bg-neutral-300 disabled:cursor-not-allowed text-white font-bold rounded-2xl shadow-md transition-all flex items-center justify-center gap-2 text-sm"
-            >
-              {shiftStatus === 'open' ? (
-                <>
-                  <DollarSign className="w-4 h-4 text-emerald-400" /> Simpan & Setor Kasir Malam
-                </>
-              ) : shiftStatus === 'closed' ? (
-                <>
-                  <Lock className="w-4 h-4" /> Shift Sudah Ditutup
-                </>
-              ) : (
-                'Buka Shift Pagi Dulu'
-              )}
-            </button>
-          )}
+          ))}
         </div>
 
-        {/* Modal Konfirmasi */}
-        {showConfirmModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="w-full max-w-[360px] bg-white rounded-3xl p-6 shadow-2xl border border-neutral-100 text-center animate-in zoom-in-95 duration-200">
-              <div className="w-14 h-14 mx-auto rounded-full bg-orange-100 flex items-center justify-center text-[#C2410C] mb-4">
-                {modalType === 'open_shift' ? <Clock className="w-7 h-7" /> : <ReceiptText className="w-7 h-7" />}
-              </div>
-
-              <h3 className="text-lg font-black text-neutral-900 mb-1">
-                {modalType === 'open_shift' ? 'Konfirmasi Data Shift Pagi' : 'Konfirmasi Setoran Kasir'}
+        {/* 2. PAPAN KLASEMEN / LEADERBOARD KARYAWAN */}
+        <div className="bg-white rounded-3xl p-5 border border-neutral-200/90 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-[#C2410C]" />
+              <h3 className="text-xs font-black uppercase tracking-wider text-neutral-900">
+                Papan Juara Bulan Ini
               </h3>
-              
-              <p className="text-xs text-neutral-500 mb-5">
-                {modalType === 'open_shift'
-                  ? 'Pastikan fisik stok awal dan personil jaga sudah sesuai.'
-                  : 'Pastikan uang kasir sesuai dengan angka setoran bersih di bawah ini:'}
-              </p>
+            </div>
+            <span className="text-[10px] font-bold text-neutral-400 bg-neutral-100 px-2.5 py-0.5 rounded-full">
+              Live Klasemen
+            </span>
+          </div>
 
-              {modalType === 'close_shift' && (
-                <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-4 mb-5 text-left text-xs space-y-1.5">
-                  <div className="flex justify-between text-neutral-600">
-                    <span>Penjualan Kotor</span>
-                    <span className="font-bold text-neutral-900">Rp {grossRevenue.toLocaleString('id-ID')}</span>
-                  </div>
-                  <div className="flex justify-between text-neutral-600">
-                    <span>Fee Karyawan (10%)</span>
-                    <span className="font-semibold text-amber-600">- Rp {feeKaryawan.toLocaleString('id-ID')}</span>
-                  </div>
-                  {expenseAmount > 0 && (
-                    <div className="flex justify-between text-neutral-600">
-                      <span>Pengeluaran Toko</span>
-                      <span className="font-semibold text-rose-600">- Rp {expenseAmount.toLocaleString('id-ID')}</span>
+          {/* Toggle Tab Sales vs Disiplin */}
+          <div className="grid grid-cols-2 gap-1.5 p-1 bg-neutral-100 rounded-2xl">
+            <button
+              type="button"
+              onClick={() => setActiveTab('sales')}
+              className={`py-2 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+                activeTab === 'sales'
+                  ? 'bg-white text-neutral-900 shadow-sm'
+                  : 'text-neutral-500 hover:text-neutral-800'
+              }`}
+            >
+              <TrendingUp className="w-3.5 h-3.5 text-[#C2410C]" />
+              <span>Raja Penjualan</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('discipline')}
+              className={`py-2 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+                activeTab === 'discipline'
+                  ? 'bg-white text-neutral-900 shadow-sm'
+                  : 'text-neutral-500 hover:text-neutral-800'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-500" />
+              <span>Paling Rajin</span>
+            </button>
+          </div>
+
+          {/* List Juara */}
+          {loading ? (
+            <p className="text-xs text-neutral-400 text-center py-4">Menghitung klasemen...</p>
+          ) : leaderboard.length === 0 ? (
+            <p className="text-xs text-neutral-400 text-center py-4">Belum ada data shift bulan ini.</p>
+          ) : (
+            <div className="space-y-2">
+              {(activeTab === 'sales' ? sortedSales : sortedDiscipline).map((emp, idx) => {
+                const isFirst = idx === 0;
+                const isSecond = idx === 1;
+                const isThird = idx === 2;
+
+                return (
+                  <div
+                    key={emp.id}
+                    className={`p-3 rounded-2xl flex items-center justify-between border transition-all ${
+                      isFirst
+                        ? 'bg-orange-50/60 border-orange-200'
+                        : isSecond
+                        ? 'bg-neutral-50 border-neutral-200'
+                        : isThird
+                        ? 'bg-neutral-50/60 border-neutral-200'
+                        : 'bg-white border-neutral-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs font-black ${
+                          isFirst
+                            ? 'bg-[#C2410C] text-white shadow-sm'
+                            : isSecond
+                            ? 'bg-neutral-700 text-white'
+                            : isThird
+                            ? 'bg-amber-600 text-white'
+                            : 'bg-neutral-200 text-neutral-600'
+                        }`}
+                      >
+                        {idx + 1}
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black text-neutral-900 flex items-center gap-1.5">
+                          {emp.name}
+                          {isFirst && <Award className="w-3.5 h-3.5 text-[#C2410C]" />}
+                        </h4>
+                        <span className="text-[10px] text-neutral-400 font-medium">
+                          {emp.shiftsCount} shift jaga
+                        </span>
+                      </div>
                     </div>
-                  )}
-                  <div className="pt-2 border-t border-neutral-200 flex justify-between items-center text-sm font-black">
-                    <span className="text-neutral-900">Uang Disetor:</span>
-                    <span className="text-emerald-600 text-base">
-                      Rp {netCashDeposit.toLocaleString('id-ID')}
-                    </span>
+
+                    <div className="text-right">
+                      {activeTab === 'sales' ? (
+                        <>
+                          <span className="text-xs font-black text-neutral-900 block">
+                            {emp.totalSold.toLocaleString('id-ID')} <span className="text-[10px] font-normal text-neutral-500">btr</span>
+                          </span>
+                          <span className="text-[9px] text-emerald-600 font-bold">Terjual</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-xs font-black text-amber-600 block">
+                            {emp.totalPoints} <span className="text-[10px] font-normal text-neutral-500">pts</span>
+                          </span>
+                          <span className="text-[9px] text-neutral-400 font-bold">Disiplin Buka</span>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
+                );
+              })}
+            </div>
+          )}
+
+          <p className="text-[10px] text-neutral-400 text-center pt-1">
+            🔥 Terus tingkatkan penjualan & buka shift tepat waktu sebelum jam 09.00 untuk kejar bonus bulanan!
+          </p>
+        </div>
+
+        {/* 3. TOMBOL KHUSUS OWNER */}
+        <div className="pt-2 text-center">
+          <button
+            type="button"
+            onClick={() => setShowPinModal(true)}
+            className="text-xs font-bold text-neutral-400 hover:text-neutral-700 flex items-center justify-center gap-1.5 mx-auto transition-colors"
+          >
+            <ShieldAlert className="w-3.5 h-3.5" /> Masuk Portal Owner (PIN)
+          </button>
+        </div>
+
+      </div>
+
+      {/* POPUP INPUT PIN OWNER */}
+      {showPinModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-xs bg-white rounded-3xl p-6 shadow-2xl border border-neutral-100 text-center animate-in zoom-in-95">
+            <h3 className="text-base font-black text-neutral-900 mb-1">Verifikasi Owner</h3>
+            <p className="text-xs text-neutral-500 mb-4">Masukkan 4 digit PIN khusus owner.</p>
+
+            <form onSubmit={handleVerifyOwnerPin} className="space-y-3">
+              <input
+                type="password"
+                maxLength={4}
+                autoFocus
+                placeholder="••••"
+                value={ownerPin}
+                onChange={(e) => {
+                  setOwnerPin(e.target.value);
+                  setPinError(false);
+                }}
+                className="w-full text-center tracking-widest text-2xl font-black bg-neutral-100 rounded-2xl py-2.5 focus:outline-none focus:ring-2 focus:ring-[#C2410C]"
+              />
+
+              {pinError && (
+                <p className="text-xs text-rose-600 font-bold">PIN salah, silakan coba lagi.</p>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="flex gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowConfirmModal(false)}
-                  className="py-3 px-4 rounded-xl border border-neutral-200 text-xs font-bold text-neutral-600 hover:bg-neutral-50"
+                  onClick={() => {
+                    setShowPinModal(false);
+                    setOwnerPin('');
+                    setPinError(false);
+                  }}
+                  className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-neutral-600 text-xs font-bold transition-all"
                 >
                   Batal
                 </button>
                 <button
-                  type="button"
-                  onClick={modalType === 'open_shift' ? executeOpenShift : executeCloseShift}
-                  className="py-3 px-4 rounded-xl bg-[#C2410C] hover:bg-[#A3360A] text-xs font-bold text-white shadow-md"
+                  type="submit"
+                  className="flex-1 py-2.5 rounded-xl bg-neutral-900 hover:bg-black text-white text-xs font-bold transition-all"
                 >
-                  {modalType === 'open_shift' ? 'Ya, Simpan' : 'Ya, Setor & Kunci'}
+                  Masuk
                 </button>
               </div>
-            </div>
+            </form>
           </div>
-        )}
-
-        {/* Modal Feedback */}
-        {feedbackModal.show && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="w-full max-w-[340px] bg-white rounded-3xl p-6 shadow-2xl border border-neutral-100 text-center animate-in zoom-in-95 duration-200 relative">
-              <button
-                onClick={() => setFeedbackModal((prev) => ({ ...prev, show: false }))}
-                className="absolute top-4 right-4 w-8 h-8 rounded-full bg-neutral-100 flex items-center justify-center text-neutral-500 hover:text-neutral-900"
-              >
-                <X className="w-4 h-4" />
-              </button>
-
-              <div
-                className={`w-14 h-14 mx-auto rounded-full flex items-center justify-center mb-4 ${
-                  feedbackModal.type === 'success' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
-                }`}
-              >
-                {feedbackModal.type === 'success' ? <CheckCircle2 className="w-7 h-7" /> : <AlertCircle className="w-7 h-7" />}
-              </div>
-
-              <h3 className="text-base font-black text-neutral-900 mb-1.5">{feedbackModal.title}</h3>
-              <p className="text-xs text-neutral-500 leading-relaxed mb-6">{feedbackModal.message}</p>
-
-              <button
-                type="button"
-                onClick={() => setFeedbackModal((prev) => ({ ...prev, show: false }))}
-                className="w-full py-3 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-bold shadow-md"
-              >
-                Mengerti
-              </button>
-            </div>
-          </div>
-        )}
-
-      </div>
+        </div>
+      )}
     </main>
   );
 }
