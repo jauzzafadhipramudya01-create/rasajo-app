@@ -683,15 +683,14 @@ export default function OutletStaffPage() {
         {activeTab === 'final' && (
           <div className="space-y-4">
 
-            {/* 1. KARTU TAMBAHAN STOK SIANG/SORE LENGKAP */}
+            {/* 1. KARTU TAMBAHAN STOK SIANG/SORE */}
             <div className="bg-white rounded-3xl p-5 shadow-sm border border-neutral-200/80 space-y-3.5">
               <div>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 block">Kiriman Susulan</span>
                 <h3 className="text-sm font-black text-neutral-900">Tambahan Stok Siang / Sore</h3>
-                <p className="text-xs text-neutral-500 mt-0.5">Isi hanya jika ada kiriman tambahan barang di tengah hari.</p>
+                <p className="text-xs text-neutral-500 mt-0.5">Isi jika ada kiriman tambahan barang di tengah hari.</p>
               </div>
 
-              {/* Butir Tambahan */}
               <div className="space-y-2">
                 <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-3 flex items-center justify-between">
                   <span className="text-xs font-bold text-neutral-600">+ Butir Cilok</span>
@@ -718,7 +717,6 @@ export default function OutletStaffPage() {
                 </div>
               </div>
 
-              {/* Tambahan Bahan Pendukung */}
               <div className="pt-1">
                 <span className="text-[11px] font-bold text-neutral-500 block mb-1.5">Tambahan Bahan Lain:</span>
                 <div className="grid grid-cols-3 gap-2">
@@ -788,7 +786,6 @@ export default function OutletStaffPage() {
                 </div>
               </div>
 
-              {/* Sisa Bahan Pendukung Malam */}
               <div className="pt-1">
                 <span className="text-[11px] font-bold text-neutral-500 block mb-1.5">Sisa Bahan Malam:</span>
                 <div className="grid grid-cols-3 gap-2">
@@ -813,12 +810,12 @@ export default function OutletStaffPage() {
               </div>
             </div>
 
-            {/* 3. PENGELUARAN KASIR CABANG (DESAIN BERSIH & LEGA DI HP) */}
+            {/* 3. PENGELUARAN KASIR: KARTU BERTUMPUK LEGA KHUSUS HP */}
             <div className="bg-white rounded-3xl p-5 shadow-sm border border-neutral-200/80 space-y-3.5">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-black text-neutral-900">Pengeluaran Kasir Hari Ini</h3>
-                  <p className="text-xs text-neutral-400 mt-0.5">Es batu, gas, kebersihan, dll</p>
+                  <p className="text-xs text-neutral-400 mt-0.5">Plastik, Tusukan DLL</p>
                 </div>
                 {totalExpenses > 0 && (
                   <span className="text-xs font-black text-rose-600 bg-rose-50 px-2.5 py-1 rounded-xl">
@@ -829,7 +826,8 @@ export default function OutletStaffPage() {
 
               <div className="space-y-3">
                 {expenseList.map((row, idx) => (
-                  <div key={idx} className="bg-neutral-50 border border-neutral-200/90 rounded-2xl p-3 space-y-2">
+                  <div key={idx} className="bg-neutral-50 border border-neutral-200 rounded-2xl p-3.5 space-y-2.5">
+                    {/* Baris 1: Keperluan Lebar */}
                     <div>
                       <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block mb-1">
                         Keperluan #{idx + 1}
@@ -840,32 +838,38 @@ export default function OutletStaffPage() {
                         placeholder="Contoh: Es batu 2 kantong"
                         value={row.note}
                         onChange={(e) => handleExpenseChange(idx, 'note', e.target.value)}
-                        className="w-full bg-white border border-neutral-200 rounded-xl px-3 py-2 text-xs font-semibold text-neutral-900 focus:outline-none focus:border-[#C2410C]"
+                        className="w-full bg-white border border-neutral-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-neutral-900 focus:outline-none focus:border-[#C2410C]"
                       />
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <div className="relative flex-1">
-                        <span className="absolute left-3 top-2.5 text-xs font-bold text-neutral-400">Rp</span>
-                        <input
-                          type="number"
-                          disabled={shiftStatus === 'closed'}
-                          placeholder="0"
-                          value={row.amount || ''}
-                          onChange={(e) => handleExpenseChange(idx, 'amount', e.target.value)}
-                          className="w-full bg-white border border-neutral-200 rounded-xl pl-9 pr-3 py-2 text-sm font-black text-neutral-900 focus:outline-none focus:border-[#C2410C]"
-                        />
-                      </div>
+                    {/* Baris 2: Input Rp Lebar & Tombol Hapus */}
+                    <div>
+                      <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block mb-1">
+                        Nominal Biaya
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <div className="relative flex-1">
+                          <span className="absolute left-3.5 top-2.5 text-xs font-bold text-neutral-400">Rp</span>
+                          <input
+                            type="number"
+                            disabled={shiftStatus === 'closed'}
+                            placeholder="0"
+                            value={row.amount || ''}
+                            onChange={(e) => handleExpenseChange(idx, 'amount', e.target.value)}
+                            className="w-full bg-white border border-neutral-200 rounded-xl pl-10 pr-3.5 py-2 text-sm font-black text-neutral-900 focus:outline-none focus:border-[#C2410C]"
+                          />
+                        </div>
 
-                      {shiftStatus !== 'closed' && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveExpenseRow(idx)}
-                          className="h-10 w-10 rounded-xl bg-white border border-neutral-200 text-neutral-400 hover:text-rose-600 hover:border-rose-200 flex items-center justify-center shrink-0 active:scale-95 transition-all"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
+                        {shiftStatus !== 'closed' && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveExpenseRow(idx)}
+                            className="h-10 w-10 rounded-xl bg-white border border-neutral-200 text-neutral-400 hover:text-rose-600 hover:border-rose-200 flex items-center justify-center shrink-0 active:scale-95 transition-all"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -875,14 +879,14 @@ export default function OutletStaffPage() {
                 <button
                   type="button"
                   onClick={handleAddExpenseRow}
-                  className="w-full py-2.5 rounded-xl border border-dashed border-neutral-300 hover:border-[#C2410C] text-xs font-bold text-[#C2410C] bg-orange-50/40 flex items-center justify-center gap-1.5 transition-colors"
+                  className="w-full py-3 rounded-xl border border-dashed border-neutral-300 active:border-[#C2410C] text-xs font-bold text-[#C2410C] bg-orange-50/40 flex items-center justify-center gap-1.5 transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5" /> Tambah Catatan Pengeluaran
                 </button>
               )}
             </div>
 
-            {/* 4. RINGKASAN KEUANGAN: 1 BARIS SEJAJAR RAPI */}
+            {/* 4. RINGKASAN KEUANGAN: 1 BARIS SEJAJAR TIDAK PATAH DI HP */}
             <div className="bg-neutral-900 rounded-3xl p-5 text-white space-y-3 shadow-md">
               <div className="border-b border-neutral-800 pb-2.5 space-y-1.5">
                 <div className="flex items-center justify-between text-xs text-neutral-400">
@@ -891,27 +895,28 @@ export default function OutletStaffPage() {
                 </div>
                 <div className="flex items-center justify-between text-xs pt-1">
                   <span className="text-neutral-300 font-bold">Total Omzet ({totalSoldAll} btr)</span>
-                  <span className="text-white font-black text-sm">Rp {grossRevenue.toLocaleString('id-ID')}</span>
+                  <span className="text-white font-black text-sm whitespace-nowrap">Rp {grossRevenue.toLocaleString('id-ID')}</span>
                 </div>
               </div>
 
               <div className="flex items-center justify-between text-xs text-amber-400">
                 <span className="font-bold">Hak Fee Jaga (10%)</span>
-                <span className="font-black text-sm">Rp {finalFee.toLocaleString('id-ID')}</span>
+                <span className="font-black text-sm whitespace-nowrap">Rp {finalFee.toLocaleString('id-ID')}</span>
               </div>
 
               {totalExpenses > 0 && (
                 <div className="flex items-center justify-between text-xs text-rose-400">
                   <span>Pengeluaran Toko</span>
-                  <span className="font-bold">- Rp {totalExpenses.toLocaleString('id-ID')}</span>
+                  <span className="font-bold whitespace-nowrap">- Rp {totalExpenses.toLocaleString('id-ID')}</span>
                 </div>
               )}
 
+              {/* Total Setoran Wajib: Terkunci 1 Baris Sejajar */}
               <div className="pt-3 border-t border-neutral-800 flex items-center justify-between gap-2">
-                <span className="text-xs font-black uppercase tracking-wider text-neutral-300 shrink-0">
-                  Total Setoran Wajib
+                <span className="text-[11px] font-black uppercase tracking-wider text-neutral-300 shrink-0">
+                  Total Setoran Wajib:
                 </span>
-                <span className="text-lg sm:text-xl font-black text-emerald-400 tracking-tight text-right">
+                <span className="text-base font-black text-emerald-400 whitespace-nowrap text-right">
                   Rp {netCashDeposit.toLocaleString('id-ID')}
                 </span>
               </div>
