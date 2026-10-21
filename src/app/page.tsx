@@ -1,328 +1,337 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { ChevronRight, Delete, Store, Lock, ShieldCheck } from 'lucide-react';
+import {
+  Store,
+  ChevronRight,
+  ShieldAlert,
+  Flame,
+  Award,
+  Zap,
+  TrendingUp,
+  Sparkles
+} from 'lucide-react';
 
 interface Branch {
   id: string;
   name: string;
-  pin: string;
-  is_active: boolean;
-  statusToday?: 'Buka' | 'Belum buka';
 }
 
-const BRANCH_ORDER = ['Calung', 'Cemara', 'Danau Singkarak', 'Sriwijaya'];
+interface StaffLeaderboard {
+  id: string;
+  name: string;
+  totalSold: number;
+  totalPoints: number;
+  shiftsCount: number;
+}
 
 export default function HomePage() {
   const router = useRouter();
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'sales' | 'discipline'>('sales');
+  const [leaderboard, setLeaderboard] = useState<StaffLeaderboard[]>([]);
 
-  // Modal PIN Cabang
-  const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
-  const [pinInput, setPinInput] = useState('');
+  // Modal PIN Owner
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [ownerPin, setOwnerPin] = useState('');
   const [pinError, setPinError] = useState(false);
 
-  // Modal Login Owner
-  const [showOwnerLogin, setShowOwnerLogin] = useState(false);
-  const [ownerPinInput, setOwnerPinInput] = useState('');
-  const [ownerPinError, setOwnerPinError] = useState(false);
-  const [storedOwnerPin, setStoredOwnerPin] = useState('9999');
-
   useEffect(() => {
-    async function fetchData() {
-      setLoading(true);
-
-      const { data: settingData } = await supabase
-        .from('app_settings')
-        .select('value')
-        .eq('key', 'owner_pin')
-        .maybeSingle();
-
-      if (settingData?.value) {
-        setStoredOwnerPin(settingData.value);
-      }
-
-      const { data, error } = await supabase.from('branches').select('*');
-
-      if (!error && data) {
-        const today = new Date().toISOString().split('T')[0];
-        const branchesWithStatus = await Promise.all(
-          data.map(async (b) => {
-            const { data: shift } = await supabase
-              .from('daily_shifts')
-              .select('id, status')
-              .eq('branch_id', b.id)
-              .eq('shift_date', today)
-              .maybeSingle();
-
-            return {
-              ...b,
-              statusToday: shift?.status === 'open' ? 'Buka' : 'Belum buka',
-            };
-          })
-        );
-
-        branchesWithStatus.sort((a, b) => {
-          const indexA = BRANCH_ORDER.indexOf(a.name);
-          const indexB = BRANCH_ORDER.indexOf(b.name);
-          return (indexA === -1 ? 99 : indexA) - (indexB === -1 ? 99 : indexB);
-        });
-
-        setBranches(branchesWithStatus as Branch[]);
-      }
-      setLoading(false);
-    }
-
-    fetchData();
+    fetchInitialData();
   }, []);
 
-  const handleBranchClick = (branch: Branch) => {
-    setSelectedBranch(branch);
-    setPinInput('');
-    setPinError(false);
-  };
+  const fetchInitialData = async () => {
+    setLoading(true);
 
-  const handleKeyPress = (num: string) => {
-    if (pinInput.length < 4) {
-      const nextPin = pinInput + num;
-      setPinInput(nextPin);
-      setPinError(false);
+    // 1. Ambil 4 Cabang
+    const { data: bData } = await supabase.from('branches').select('id, name').order('name');
+    if (bData) setBranches(bData);
 
-      if (nextPin.length === 4 && selectedBranch) {
-        if (nextPin === selectedBranch.pin) {
-          sessionStorage.setItem('rasajo_branch_id', selectedBranch.id);
-          sessionStorage.setItem('rasajo_branch_name', selectedBranch.name);
-          router.push(`/outlet/${selectedBranch.id}`);
-        } else {
-          setPinError(true);
-          setTimeout(() => setPinInput(''), 600);
-        }
-      }
+    // 2. Ambil Rekap Shift Bulan Ini
+    const today = new Date();
+    const firstDayOfMonth = today.toISOString().slice(0, 8) + '01';
+    const todayStr = today.toISOString().split('T')[0];
+
+    const { data: shiftData } = await supabase
+      .from('daily_shifts')
+      .select('id, sold_cilok, sold_tahu, discipline_points, status')
+      .gte('shift_date', firstDayOfMonth)
+      .lte('shift_date', todayStr)
+      .eq('status', 'closed');
+
+    const { data: staffData } = await supabase
+      .from('shift_staff')
+      .select('shift_id, employee_id, employees(id, name)');
+
+    if (shiftData && staffData) {
+      const staffMap: Record<string, StaffLeaderboard> = {};
+
+      shiftData.forEach((s) => {
+        const assignedStaff = staffData.filter((st) => st.shift_id === s.id);
+        const count = assignedStaff.length || 1;
+        const soldPerPerson = Math.round(((s.sold_cilok || 0) + (s.sold_tahu || 0)) / count);
+        const pointsPerPerson = s.discipline_points || 0;
+
+        assignedStaff.forEach((st: any) => {
+          const empId = st.employees?.id || st.employee_id;
+          const empName = st.employees?.name || 'Karyawan';
+
+          if (!staffMap[empId]) {
+            staffMap[empId] = {
+              id: empId,
+              name: empName,
+              totalSold: 0,
+              totalPoints: 0,
+              shiftsCount: 0,
+            };
+          }
+
+          staffMap[empId].totalSold += soldPerPerson;
+          staffMap[empId].totalPoints += pointsPerPerson;
+          staffMap[empId].shiftsCount += 1;
+        });
+      });
+
+      setLeaderboard(Object.values(staffMap));
     }
+
+    setLoading(false);
   };
 
-  const handleOwnerKeyPress = (num: string) => {
-    if (ownerPinInput.length < 4) {
-      const next = ownerPinInput + num;
-      setOwnerPinInput(next);
-      setOwnerPinError(false);
+  const sortedSales = useMemo(() => {
+    return [...leaderboard].sort((a, b) => b.totalSold - a.totalSold);
+  }, [leaderboard]);
 
-      if (next.length === 4) {
-        if (next === storedOwnerPin) {
-          sessionStorage.setItem('rasajo_owner_logged_in', 'true');
-          router.push('/owner');
-        } else {
-          setOwnerPinError(true);
-          setTimeout(() => setOwnerPinInput(''), 600);
-        }
-      }
+  const sortedDiscipline = useMemo(() => {
+    return [...leaderboard].sort((a, b) => b.totalPoints - a.totalPoints);
+  }, [leaderboard]);
+
+  const handleVerifyOwnerPin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (ownerPin === '1234') {
+      setShowPinModal(false);
+      router.push('/owner');
+    } else {
+      setPinError(true);
     }
   };
 
   return (
-    <main className="min-h-screen bg-neutral-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-[420px] bg-white rounded-3xl shadow-xl overflow-hidden border border-neutral-200 min-h-[720px] flex flex-col justify-between p-6">
-        <div>
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 rounded-full bg-[#C2410C] flex items-center justify-center text-white font-bold text-lg shadow-sm">
-              R
+    <main className="min-h-screen bg-[#F4F5F7] text-neutral-800 pb-16 font-sans antialiased">
+      <div className="max-w-md mx-auto p-4 sm:p-5 space-y-6">
+
+        {/* Header App */}
+        <div className="text-center pt-3 pb-1">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-orange-100 text-[#C2410C] rounded-full text-xs font-black uppercase tracking-wider mb-2">
+            <Flame className="w-3.5 h-3.5 fill-[#C2410C]" /> Rasajo Portal
+          </div>
+          <h1 className="text-2xl font-black text-neutral-900 tracking-tight">Pilih Outlet Kamu</h1>
+          <p className="text-xs text-neutral-500 mt-1">Pilih cabang tugasmu untuk mulai mencatat kasir.</p>
+        </div>
+
+        {/* PILIHAN 4 CABANG */}
+        <div className="space-y-2.5">
+          {branches.map((b) => (
+            <button
+              key={b.id}
+              onClick={() => router.push(`/outlet/${b.id}`)}
+              className="w-full bg-white hover:bg-neutral-50 border border-neutral-200/90 rounded-2xl p-4 flex items-center justify-between shadow-sm active:scale-[0.98] transition-all group"
+            >
+              <div className="flex items-center gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-orange-50 text-[#C2410C] flex items-center justify-center group-hover:bg-[#C2410C] group-hover:text-white transition-colors">
+                  <Store className="w-5 h-5" />
+                </div>
+                <div className="text-left">
+                  <h2 className="text-sm font-extrabold text-neutral-900">{b.name}</h2>
+                  <span className="text-[11px] text-neutral-400 font-medium">Buka kasir & lapor stok</span>
+                </div>
+              </div>
+              <ChevronRight className="w-5 h-5 text-neutral-400 group-hover:translate-x-1 transition-transform" />
+            </button>
+          ))}
+        </div>
+
+        {/* PAPAN JUARA BULAN INI */}
+        <div className="bg-white rounded-3xl p-5 border border-neutral-200/90 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-[#C2410C]" />
+              <h3 className="text-xs font-black uppercase tracking-wider text-neutral-900">
+                Papan Juara Bulan Ini
+              </h3>
             </div>
-            <span className="font-bold text-neutral-900 tracking-wider text-base">RASAJO</span>
+            <span className="text-[10px] font-bold text-neutral-400 bg-neutral-100 px-2.5 py-0.5 rounded-full">
+              Live Klasemen
+            </span>
           </div>
 
-          <h1 className="text-2xl font-extrabold text-neutral-900 mb-1">Pilih outlet kamu</h1>
-          <p className="text-neutral-500 text-sm mb-6">Sentuh salah satu cabang untuk mulai shift.</p>
+          {/* Toggle Tab */}
+          <div className="grid grid-cols-2 gap-1.5 p-1 bg-neutral-100 rounded-2xl">
+            <button
+              type="button"
+              onClick={() => setActiveTab('sales')}
+              className={`py-2 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+                activeTab === 'sales'
+                  ? 'bg-white text-neutral-900 shadow-sm'
+                  : 'text-neutral-500 hover:text-neutral-800'
+              }`}
+            >
+              <TrendingUp className="w-3.5 h-3.5 text-[#C2410C]" />
+              <span>Raja Penjualan</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('discipline')}
+              className={`py-2 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+                activeTab === 'discipline'
+                  ? 'bg-white text-neutral-900 shadow-sm'
+                  : 'text-neutral-500 hover:text-neutral-800'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-500" />
+              <span>Paling Rajin</span>
+            </button>
+          </div>
 
-          <div className="space-y-3">
-            {loading ? (
-              <div className="text-center py-10 text-neutral-400 text-sm">Memuat data cabang...</div>
-            ) : (
-              branches.map((branch) => (
-                <button
-                  key={branch.id}
-                  onClick={() => handleBranchClick(branch)}
-                  className="w-full text-left bg-white border border-neutral-200 hover:border-[#C2410C] rounded-2xl p-4 transition-all active:scale-[0.98] shadow-sm flex items-center justify-between group"
-                >
-                  <div className="flex items-center gap-3.5">
-                    <div className="p-2.5 bg-neutral-50 border border-neutral-100 rounded-xl group-hover:bg-orange-50 transition-colors">
-                      <Store className="w-5 h-5 text-neutral-600 group-hover:text-[#C2410C]" />
-                    </div>
-                    <div>
-                      <h2 className="font-semibold text-neutral-900 text-base leading-snug">{branch.name}</h2>
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <span
-                          className={`w-2 h-2 rounded-full ${
-                            branch.statusToday === 'Buka' ? 'bg-emerald-500' : 'bg-neutral-300'
-                          }`}
-                        />
-                        <span
-                          className={`text-xs font-medium ${
-                            branch.statusToday === 'Buka' ? 'text-emerald-700' : 'text-neutral-400'
-                          }`}
-                        >
-                          {branch.statusToday === 'Buka' ? 'Sedang beroperasi' : 'Belum buka'}
+          {/* Daftar Ranking */}
+          {loading ? (
+            <p className="text-xs text-neutral-400 text-center py-4">Menghitung klasemen...</p>
+          ) : leaderboard.length === 0 ? (
+            <p className="text-xs text-neutral-400 text-center py-4">Belum ada data shift bulan ini.</p>
+          ) : (
+            <div className="space-y-2">
+              {(activeTab === 'sales' ? sortedSales : sortedDiscipline).map((emp, idx) => {
+                const isFirst = idx === 0;
+                const isSecond = idx === 1;
+                const isThird = idx === 2;
+
+                return (
+                  <div
+                    key={emp.id}
+                    className={`p-3 rounded-2xl flex items-center justify-between border transition-all ${
+                      isFirst
+                        ? 'bg-orange-50/60 border-orange-200'
+                        : isSecond
+                        ? 'bg-neutral-50 border-neutral-200'
+                        : isThird
+                        ? 'bg-neutral-50/60 border-neutral-200'
+                        : 'bg-white border-neutral-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs font-black ${
+                          isFirst
+                            ? 'bg-[#C2410C] text-white shadow-sm'
+                            : isSecond
+                            ? 'bg-neutral-700 text-white'
+                            : isThird
+                            ? 'bg-amber-600 text-white'
+                            : 'bg-neutral-200 text-neutral-600'
+                        }`}
+                      >
+                        {idx + 1}
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black text-neutral-900 flex items-center gap-1.5">
+                          {emp.name}
+                          {isFirst && <Award className="w-3.5 h-3.5 text-[#C2410C]" />}
+                        </h4>
+                        <span className="text-[10px] text-neutral-400 font-medium">
+                          {emp.shiftsCount} shift jaga
                         </span>
                       </div>
                     </div>
+
+                    <div className="text-right">
+                      {activeTab === 'sales' ? (
+                        <>
+                          <span className="text-xs font-black text-neutral-900 block">
+                            {emp.totalSold.toLocaleString('id-ID')} <span className="text-[10px] font-normal text-neutral-500">btr</span>
+                          </span>
+                          <span className="text-[9px] text-emerald-600 font-bold">Terjual</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-xs font-black text-amber-600 block">
+                            {emp.totalPoints} <span className="text-[10px] font-normal text-neutral-500">pts</span>
+                          </span>
+                          <span className="text-[9px] text-neutral-400 font-bold">Disiplin Buka</span>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <ChevronRight className="w-5 h-5 text-neutral-400 group-hover:text-neutral-700" />
-                </button>
-              ))
-            )}
-          </div>
+                );
+              })}
+            </div>
+          )}
+
+          <p className="text-[10px] text-neutral-400 text-center pt-1 leading-relaxed">
+            🔥 Buka kasir sebelum jam 09.00 (+2 Poin) & sebelum jam 12.00 (+1 Poin) untuk kejar bonus bulanan!
+          </p>
         </div>
 
-        <div className="pt-6 border-t border-neutral-100 text-center">
-          <button 
-            onClick={() => {
-              setShowOwnerLogin(true);
-              setOwnerPinInput('');
-              setOwnerPinError(false);
-            }}
-            className="text-xs text-neutral-500 hover:text-[#C2410C] font-semibold transition-colors flex items-center justify-center gap-1.5 mx-auto"
+        {/* TOMBOL OWNER */}
+        <div className="pt-2 text-center">
+          <button
+            type="button"
+            onClick={() => setShowPinModal(true)}
+            className="text-xs font-bold text-neutral-400 hover:text-neutral-700 flex items-center justify-center gap-1.5 mx-auto transition-colors"
           >
-            <Lock className="w-3.5 h-3.5" /> Masuk sebagai Owner
+            <ShieldAlert className="w-3.5 h-3.5" /> Masuk Portal Owner (PIN)
           </button>
         </div>
+
       </div>
 
-      {/* Modal PIN Cabang */}
-      {selectedBranch && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full max-w-[420px] bg-white rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl flex flex-col justify-between min-h-[600px] animate-in slide-in-from-bottom duration-200">
-            <div className="flex items-center justify-between pb-2">
-              <button
-                onClick={() => setSelectedBranch(null)}
-                className="w-9 h-9 rounded-full border border-neutral-200 flex items-center justify-center text-neutral-600 hover:bg-neutral-50"
-              >
-                &larr;
-              </button>
-              <div className="text-center flex-1 mr-9">
-                <h3 className="font-bold text-neutral-900 text-lg">{selectedBranch.name}</h3>
-                <p className="text-xs text-neutral-500">Masukkan PIN cabang 4-angka</p>
-              </div>
-            </div>
-
-            <div className="flex justify-center items-center gap-4 my-4">
-              {[0, 1, 2, 3].map((index) => (
-                <div
-                  key={index}
-                  className={`w-4 h-4 rounded-full border-2 transition-all ${
-                    pinError
-                      ? 'border-red-500 bg-red-100 scale-110'
-                      : pinInput.length > index
-                      ? 'border-[#C2410C] bg-[#C2410C] scale-110'
-                      : 'border-neutral-300 bg-white'
-                  }`}
-                />
-              ))}
-            </div>
-
-            {pinError && (
-              <p className="text-center text-xs font-semibold text-red-500 -mt-2 mb-2">PIN salah!</p>
-            )}
-
-            <div className="grid grid-cols-3 gap-3 max-w-[280px] mx-auto w-full my-auto">
-              {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
-                <button
-                  key={digit}
-                  onClick={() => handleKeyPress(digit)}
-                  className="h-14 rounded-2xl border border-neutral-200 text-xl font-bold text-neutral-800 hover:bg-neutral-50 active:scale-95 shadow-sm transition-all"
-                >
-                  {digit}
-                </button>
-              ))}
-              <button
-                onClick={() => setPinInput('')}
-                className="h-14 rounded-2xl text-xs font-bold text-neutral-400 hover:text-neutral-700"
-              >
-                Hapus
-              </button>
-              <button
-                onClick={() => handleKeyPress('0')}
-                className="h-14 rounded-2xl border border-neutral-200 text-xl font-bold text-neutral-800 hover:bg-neutral-50 active:scale-95 shadow-sm transition-all"
-              >
-                0
-              </button>
-              <button
-                onClick={() => setPinInput((p) => p.slice(0, -1))}
-                className="h-14 rounded-2xl border border-neutral-200 flex items-center justify-center text-neutral-600 hover:bg-neutral-50 active:scale-95 shadow-sm"
-              >
-                <Delete className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Login Owner (Password Rahasia Tanpa Bocoran) */}
-      {showOwnerLogin && (
+      {/* POPUP PIN OWNER */}
+      {showPinModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-[360px] bg-white rounded-3xl p-6 shadow-2xl border border-neutral-100 text-center animate-in zoom-in-95 duration-150">
-            <div className="w-12 h-12 rounded-full bg-neutral-900 text-white mx-auto flex items-center justify-center mb-3">
-              <ShieldCheck className="w-6 h-6" />
-            </div>
-            <h3 className="text-lg font-black text-neutral-900 mb-1">Owner Access</h3>
-            <p className="text-xs text-neutral-500 mb-4">Masukkan 4-angka PIN keamanan Owner</p>
+          <div className="w-full max-w-xs bg-white rounded-3xl p-6 shadow-2xl border border-neutral-100 text-center animate-in zoom-in-95">
+            <h3 className="text-base font-black text-neutral-900 mb-1">Verifikasi Owner</h3>
+            <p className="text-xs text-neutral-500 mb-4">Masukkan 4 digit PIN owner.</p>
 
-            <div className="flex justify-center items-center gap-3 mb-5">
-              {[0, 1, 2, 3].map((index) => (
-                <div
-                  key={index}
-                  className={`w-3.5 h-3.5 rounded-full border-2 transition-all ${
-                    ownerPinError
-                      ? 'border-red-500 bg-red-100 scale-110'
-                      : ownerPinInput.length > index
-                      ? 'border-neutral-900 bg-neutral-900 scale-110'
-                      : 'border-neutral-300 bg-white'
-                  }`}
-                />
-              ))}
-            </div>
+            <form onSubmit={handleVerifyOwnerPin} className="space-y-3">
+              <input
+                type="password"
+                maxLength={4}
+                autoFocus
+                placeholder="••••"
+                value={ownerPin}
+                onChange={(e) => {
+                  setOwnerPin(e.target.value);
+                  setPinError(false);
+                }}
+                className="w-full text-center tracking-widest text-2xl font-black bg-neutral-100 rounded-2xl py-2.5 focus:outline-none focus:ring-2 focus:ring-[#C2410C]"
+              />
 
-            {ownerPinError && (
-              <p className="text-center text-xs font-semibold text-red-500 -mt-3 mb-3">PIN Owner salah!</p>
-            )}
+              {pinError && (
+                <p className="text-xs text-rose-600 font-bold">PIN salah, coba lagi.</p>
+              )}
 
-            <div className="grid grid-cols-3 gap-2.5 max-w-[240px] mx-auto w-full mb-4">
-              {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
+              <div className="flex gap-2 pt-2">
                 <button
-                  key={digit}
-                  onClick={() => handleOwnerKeyPress(digit)}
-                  className="h-12 rounded-xl border border-neutral-200 text-lg font-bold text-neutral-800 hover:bg-neutral-50 active:scale-95 shadow-sm"
+                  type="button"
+                  onClick={() => {
+                    setShowPinModal(false);
+                    setOwnerPin('');
+                    setPinError(false);
+                  }}
+                  className="flex-1 py-2.5 rounded-xl bg-neutral-100 text-neutral-600 text-xs font-bold"
                 >
-                  {digit}
+                  Batal
                 </button>
-              ))}
-              <button
-                onClick={() => setOwnerPinInput('')}
-                className="h-12 rounded-xl text-[11px] font-bold text-neutral-400"
-              >
-                Clear
-              </button>
-              <button
-                onClick={() => handleOwnerKeyPress('0')}
-                className="h-12 rounded-xl border border-neutral-200 text-lg font-bold text-neutral-800 hover:bg-neutral-50 active:scale-95 shadow-sm"
-              >
-                0
-              </button>
-              <button
-                onClick={() => setOwnerPinInput((p) => p.slice(0, -1))}
-                className="h-12 rounded-xl border border-neutral-200 flex items-center justify-center text-neutral-600 hover:bg-neutral-50 active:scale-95 shadow-sm"
-              >
-                <Delete className="w-5 h-5" />
-              </button>
-            </div>
-
-            <button
-              onClick={() => setShowOwnerLogin(false)}
-              className="w-full py-2.5 text-xs font-bold text-neutral-500 hover:text-neutral-900 transition-colors"
-            >
-              Kembali ke Menu Outlet
-            </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 rounded-xl bg-neutral-900 text-white text-xs font-bold"
+                >
+                  Masuk
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
